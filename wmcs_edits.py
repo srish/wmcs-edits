@@ -18,15 +18,13 @@
 #
 # You should have received a copy of the GNU General Public License along
 # with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import argparse
 import datetime
-import dns.resolver
 import ipaddress
 import itertools
 import logging
-import os
-import sys
-
+import dns.resolver
 import pymysql
 
 WMCS_NETWORKS = [
@@ -47,14 +45,16 @@ WMCS_NETWORKS = [
 ]
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
-def parse_date(s):
+def parse_date(p_dt):
+    """ Checks if the date is in the following format '%Y-%m-%d'
+    """
     try:
-        return datetime.datetime.strptime(s, '%Y-%m-%d').date()
+        return datetime.datetime.strptime(p_dt, '%Y-%m-%d').date()
     except ValueError:
-        raise argparse.ArgumentTypeError('Not a valid date: "%s"' % s)
+        raise argparse.ArgumentTypeError('Not a valid date: "%s"' % p_dt)
 
 
 def strcspn(string, pred):
@@ -106,7 +106,7 @@ def get_slice(dbname):
 def get_conn(dbname):
     s = get_slice(dbname)
     ans = dns.resolver.query(
-        '_{}-analytics._tcp.eqiad.wmnet'.format(get_slice(dbname)),
+        '_{}-analytics._tcp.eqiad.wmnet'.format(s),
         'SRV'
     )[0]
     return pymysql.connect(
@@ -158,40 +158,37 @@ def calc_wmcs_edits(starttime, endttime):
         try:
             stats[dbname] = get_edit_counts(dbname, starttime, endttime)
         except pymysql.MySQLError as e:
-            logging.exception('Skipping %s', dbname)
+            logging.exception('Skipping %s: %s', dbname, e)
     return stats
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Daily visit count')
-    parser.add_argument(
-        '-s', '--start',
-        metavar='YYYY-MM-DD', required=True, type=parse_date,
-        help='Start date (inclusive)')
-    parser.add_argument('-e', '--end',
-        metavar='YYYY-MM-DD', type=parse_date,
+    PARSER = argparse.ArgumentParser(description='Daily visit count')
+    PARSER.add_argument('-s', '--start', metavar='YYYY-MM-DD', required=True, \
+        type=parse_date, help='Start date (inclusive)')
+    PARSER.add_argument('-e', '--end', metavar='YYYY-MM-DD', type=parse_date, \
         help='End date (exclusive)')
-    args = parser.parse_args()
+    ARGS = PARSER.parse_args()
 
-    if not args.end:
-        args.end = args.start + datetime.timedelta(1)
+    if not ARGS.end:
+        ARGS.end = ARGS.start + datetime.timedelta(1)
 
-    days = 90
-    now = datetime.datetime.utcnow()
-    start = (now - datetime.timedelta(days)).strftime('%Y%m%d000000')
-    cutoff = now.strftime('%Y%m%d000001')
+    DAYS = 90
+    NOW = datetime.datetime.utcnow()
+    START = (NOW - datetime.timedelta(DAYS)).strftime('%Y%m%d000000')
+    CUTOFF = NOW.strftime('%Y%m%d000001')
 
-    data = calc_wmcs_edits(
-        args.start.strftime('%Y%m%d000000'),
-        args.end.strftime('%Y%m%d000000'),
+    DATA = calc_wmcs_edits(
+        ARGS.start.strftime('%Y%m%d000000'),
+        ARGS.end.strftime('%Y%m%d000000'),
     )
 
-    grand_total = 0
-    wmcs_total = 0
-    for wiki in sorted(data.keys()):
-        t = data[wiki]['total']
-        w = data[wiki]['wmcs']
-        grand_total += t
-        wmcs_total += w
+    GRAND_TOTAL = 0
+    WMCS_TOTAL = 0
+    for wiki in sorted(DATA.keys()):
+        t = DATA[wiki]['total']
+        w = DATA[wiki]['wmcs']
+        GRAND_TOTAL += t
+        WMCS_TOTAL += w
         print('{},{},{}'.format(wiki, t, w))
-    print('{},{},{}'.format('TOTAL', grand_total, wmcs_total))
+    print('{},{},{}'.format('TOTAL', GRAND_TOTAL, WMCS_TOTAL))
