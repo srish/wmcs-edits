@@ -29,7 +29,7 @@ import dns.resolver
 import pymysql
 
 WMCS_NETWORKS = [
-    ipaddress.IPv4Network(unicode(net)) for net in [
+    ipaddress.IPv4Network(net) for net in [
         # eqiad
         '10.68.0.0/24',
         '10.68.16.0/21',
@@ -128,19 +128,12 @@ def get_edit_counts(dbname, startts, endts):
     connection = get_conn(dbname)
     with connection.cursor() as cur:
         cur.execute("""
-        SELECT cuc_ip, cuc_timestamp FROM cu_changes
+        SELECT cuc_ip FROM cu_changes
         WHERE cuc_timestamp > %s AND cuc_timestamp < %s
         """, (startts, endts))
 
-        timestamps = []
-        wmcs_daily_edits = 0
-        total_daily_edits = 0
-        data = []
-
         for row in cur:
             total_edits += 1
-            total_daily_edits += 1
-            cuc_t = row['cuc_timestamp']
 
             try:
                 ip = ipaddress.IPv4Address(row['cuc_ip'].decode('utf-8'))
@@ -149,25 +142,8 @@ def get_edit_counts(dbname, startts, endts):
                 continue
             for network in WMCS_NETWORKS:
                 if ip in network:
-                    wmcs_daily_edits += 1
                     wmcs_edits += 1
                     continue
-
-            if cuc_t not in timestamps:
-                timestamps.append(cuc_t)
-                data.append({
-                    'timestamp': cuc_t,
-                    'wmcs_daily_edits': wmcs_daily_edits,
-                    'total_daily_edits': total_daily_edits
-                })
-                total_daily_edits = 0
-                wmcs_daily_edits = 0
-
-    with open(dbname + '.tsv', 'wt') as tsvfile:
-        writer = csv.writer(tsvfile, delimiter='\t')
-        writer.writerow(["Timestamp", "WMCS_Daily_Edits", "Total_Daily_Edits"])
-        for ed in data:
-            writer.writerow([ed['timestamp'], ed['wmcs_daily_edits'], ed['total_daily_edits']])
 
     return {
         'wmcs': wmcs_edits,
@@ -175,7 +151,7 @@ def get_edit_counts(dbname, startts, endts):
     }
 
 
-def calc_wmcs_edits(starttime, endttime, wikiname):
+def calc_wmcs_edits(starttime, endttime):
     """Calculate the number of all / WMCS edits for all open wikis in a given
     time period.
 
@@ -183,9 +159,8 @@ def calc_wmcs_edits(starttime, endttime, wikiname):
     stats = {}
     for dbname in get_public_open_wikis():
         try:
-            if dbname == wikiname:
-                logging.info('Processing %s', dbname)
-                stats[dbname] = get_edit_counts(dbname, starttime, endttime)
+            logging.info('Processing %s', dbname)
+            stats[dbname] = get_edit_counts(dbname, starttime, endttime)
         except pymysql.MySQLError as e:
             logging.exception('Skipping %s: %s', dbname, e)
     return stats
@@ -197,7 +172,6 @@ if __name__ == '__main__':
         type=parse_date, help='Start date (inclusive)')
     PARSER.add_argument('-e', '--end', metavar='YYYY-MM-DD', type=parse_date, \
         help='End date (exclusive)')
-    PARSER.add_argument('-w', '--wiki', metavar='wikiname', help='wiki name')
     ARGS = PARSER.parse_args()
 
     if not ARGS.end:
@@ -206,16 +180,30 @@ if __name__ == '__main__':
     DATA = calc_wmcs_edits(
         ARGS.start.strftime('%Y%m%d000000'),
         ARGS.end.strftime('%Y%m%d000000'),
-        ARGS.wiki
     )
 
     GRAND_TOTAL = 0
     WMCS_TOTAL = 0
 
-    for wiki in sorted(DATA.keys()):
-        t = DATA[wiki]['total']
-        w = DATA[wiki]['wmcs']
-        GRAND_TOTAL += t
-        WMCS_TOTAL += w
-        print('{},{},{}'.format(wiki, t, w))
-    print('{},{},{}'.format('TOTAL', GRAND_TOTAL, WMCS_TOTAL))
+    with open('wmcs_edits.tsv', 'wt') as tsvfile:
+        WRITER = csv.writer(tsvfile, delimiter='\t')
+        WRITER.writerow(["WIKI", "TOTAL EDITS", "WMCS EDITS", "WMCS %"])
+
+        for wiki in sorted(DATA.keys()):
+            t = DATA[wiki]['total']
+            w = DATA[wiki]['wmcs']
+            p = 0.00
+
+            if t > 0:
+                p = round(100 * float(w)/float(t), 2)
+
+            GRAND_TOTAL += t
+            WMCS_TOTAL += w
+            WRITER.writerow([wiki, t, w, p])
+
+    WMCS_PERCENT = 0.00
+
+    if GRAND_TOTAL > 0:
+        WMCS_PERCENT = round(100 * float(WMCS_TOTAL)/float(GRAND_TOTAL), 2)
+
+    print('{},{},{},{}'.format('TOTAL', GRAND_TOTAL, WMCS_TOTAL, WMCS_PERCENT))
