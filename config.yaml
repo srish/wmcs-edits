@@ -1,0 +1,5 @@
+reports:
+  wmcs_edits:
+    granularity: months
+    starts: 2019-07-01
+    type: script
