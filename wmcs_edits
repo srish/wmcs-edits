@@ -1,0 +1,16 @@
+#!/bin/bash
+hive -e "
+	SELECT
+	    wiki_db,
+	    SUM(IF(network_origin='wikimedia_labs', edit_count, 0)) AS wmcs_edits,
+	    SUM(edit_count) AS total_edits
+	FROM joal.test_geoeditors_daily_network_origin
+	WHERE
+	    MONTH = '2019-08'
+	GROUP BY
+	    wiki_db
+	ORDER BY
+	    wiki_db
+	LIMIT 100
+	;
+" 2> /dev/null | grep -v parquet.hadoop
